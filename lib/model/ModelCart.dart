@@ -3,12 +3,14 @@ import 'dart:convert';
 
 class CartItem {
   int id;
+  int productId;
   String name;
   int quantity;
   double price;
 
   CartItem({
     required this.id,
+    required this.productId,
     required this.name,
     required this.quantity,
     required this.price,
@@ -16,6 +18,7 @@ class CartItem {
 
   factory CartItem.fromJson(Map<String, dynamic> json) => CartItem(
     id: json["id"],
+    productId: json["product_id"] ?? 0,
     name: json["name"],
     quantity: json["quantity"],
     price: (json["price"] as num).toDouble(),
@@ -23,6 +26,7 @@ class CartItem {
 
   Map<String, dynamic> toJson() => {
     "id": id,
+    "product_id": productId,
     "name": name,
     "quantity": quantity,
     "price": price,

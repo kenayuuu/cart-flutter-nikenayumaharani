@@ -1,8 +1,11 @@
 import 'dart:convert';
+import 'package:ecommerce_docker/screen/AddProductPage.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import '../model/ModelProduct.dart';
+import 'DetailListPage.dart';
 import 'CartListPage.dart';
+import 'EditProductPage.dart';
 
 class ProductListPage extends StatefulWidget {
   const ProductListPage({super.key});
@@ -13,7 +16,7 @@ class ProductListPage extends StatefulWidget {
 
 class _ProductListPageState extends State<ProductListPage> {
   final String productUrl = "http://192.168.1.39:3000/products";
-  final String cartUrl = "http://192.168.1.39:8000/carts";
+  final String cartUrl = "http://localhost:8000/api/carts";
 
   List<ModelProduct> products = [];
   bool loading = true;
@@ -25,64 +28,85 @@ class _ProductListPageState extends State<ProductListPage> {
     fetchProducts();
   }
 
+  // ================= FETCH =================
   Future<void> fetchProducts() async {
-    setState(() {
-      loading = true;
-      errorMessage = null;
-    });
-
     try {
-      final response = await http.get(Uri.parse(productUrl));
-      if (response.statusCode == 200) {
-        setState(() {
-          products = modelProductFromJson(response.body);
-          loading = false;
-        });
+      setState(() {
+        loading = true;
+        errorMessage = null;
+      });
+
+      final res = await http.get(Uri.parse(productUrl));
+      if (res.statusCode == 200) {
+        products = modelProductFromJson(res.body);
       } else {
-        setState(() {
-          errorMessage =
-              "Error ${response.statusCode}: Failed to load products";
-          loading = false;
-        });
+        throw Exception("Failed load products");
       }
     } catch (e) {
+      errorMessage = e.toString();
+    } finally {
+      if (mounted) setState(() => loading = false);
+    }
+  }
+
+  // ================= ADD TO CART =================
+  Future<void> addToCart(int productId) async {
+    await http.post(
+      Uri.parse(cartUrl),
+      headers: {"Content-Type": "application/json"},
+      body: jsonEncode({"product_id": productId, "quantity": 1}),
+    );
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text("Ditambahkan ke keranjang")));
+  }
+
+  // ================= DELETE PRODUCT =================
+  Future<void> deleteProduct(int id) async {
+    final res = await http.delete(Uri.parse("$productUrl/$id"));
+
+    if (res.statusCode == 200 && mounted) {
       setState(() {
-        errorMessage = "Exception: $e";
-        loading = false;
+        products.removeWhere((p) => p.id == id);
       });
     }
   }
 
-  Future<void> addToCart(int productId) async {
-    try {
-      final res = await http.post(
-        Uri.parse(cartUrl),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({"product_id": productId, "quantity": 1}),
-      );
+  // ================= EDIT PRODUCT =================
+  Future<void> editProduct(int index) async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => EditProductPage(product: products[index]),
+      ),
+    );
 
-      if (res.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Ditambahkan ke keranjang!")),
-        );
-      } else {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text("Gagal menambah: ${res.body}")));
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Exception: $e")));
+    if (result != null && result is ModelProduct) {
+      setState(() {
+        products[index] = result; // 🔥 INI KUNCINYA
+      });
     }
   }
 
+  // ================= UI =================
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text("Products"),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.add),
+            onPressed: () async {
+              final result = await Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const AddProductPage()),
+              );
+              if (result == true) fetchProducts();
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.shopping_cart),
             onPressed: () {
@@ -96,146 +120,98 @@ class _ProductListPageState extends State<ProductListPage> {
       ),
       body:
           loading
-              ? const Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    CircularProgressIndicator(),
-                    SizedBox(height: 16),
-                    Text('Loading products...'),
-                  ],
-                ),
-              )
+              ? const Center(child: CircularProgressIndicator())
               : errorMessage != null
-              ? Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(
-                      Icons.error_outline,
-                      size: 64,
-                      color: Colors.red,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(errorMessage!, style: const TextStyle(fontSize: 18)),
-                    const SizedBox(height: 16),
-                    ElevatedButton(
-                      onPressed: fetchProducts,
-                      child: const Text('Retry'),
-                    ),
-                  ],
+              ? Center(child: Text(errorMessage!))
+              : GridView.builder(
+                padding: const EdgeInsets.all(16),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  childAspectRatio: 0.75,
+                  crossAxisSpacing: 16,
+                  mainAxisSpacing: 16,
                 ),
-              )
-              : products.isEmpty
-              ? const Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.inventory_2_outlined,
-                      size: 64,
-                      color: Colors.grey,
+                itemCount: products.length,
+                itemBuilder: (context, index) {
+                  final product = products[index];
+
+                  return Card(
+                    key: ValueKey(product.id), // 🔥 FIX UTAMA
+                    elevation: 4,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    SizedBox(height: 16),
-                    Text(
-                      'No products available',
-                      style: TextStyle(fontSize: 18, color: Colors.grey),
-                    ),
-                  ],
-                ),
-              )
-              : RefreshIndicator(
-                onRefresh: fetchProducts,
-                child: GridView.builder(
-                  padding: const EdgeInsets.all(16),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    childAspectRatio: 0.75,
-                    crossAxisSpacing: 16,
-                    mainAxisSpacing: 16,
-                  ),
-                  itemCount: products.length,
-                  itemBuilder: (context, index) {
-                    final product = products[index];
-                    return Card(
-                      elevation: 4,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            flex: 3,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: InkWell(
+                            onTap:
+                                () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder:
+                                        (_) => DetailListPage(product: product),
+                                  ),
+                                ),
                             child: Container(
                               width: double.infinity,
                               decoration: BoxDecoration(
+                                color: Colors.grey[200],
                                 borderRadius: const BorderRadius.vertical(
                                   top: Radius.circular(12),
                                 ),
-                                color: Colors.grey[200],
                               ),
-                              child: const Center(
-                                child: Icon(
-                                  Icons.image,
-                                  size: 50,
-                                  color: Colors.grey,
-                                ),
-                              ),
+                              child: const Icon(Icons.image, size: 50),
                             ),
                           ),
-                          Expanded(
-                            flex: 2,
-                            child: Padding(
-                              padding: const EdgeInsets.all(12),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.all(8),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                product.name,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Text("\$${product.price}"),
+                              const SizedBox(height: 6),
+                              Row(
                                 children: [
-                                  Text(
-                                    product.name,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 16,
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.edit,
+                                      color: Colors.blue,
                                     ),
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
+                                    onPressed: () => editProduct(index),
                                   ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    '\$${product.price.toStringAsFixed(2)}',
-                                    style: TextStyle(
-                                      color:
-                                          Theme.of(context).colorScheme.primary,
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.w600,
+
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.delete,
+                                      color: Colors.red,
                                     ),
+                                    onPressed: () => deleteProduct(product.id),
                                   ),
                                   const Spacer(),
-                                  SizedBox(
-                                    width: double.infinity,
-                                    child: ElevatedButton.icon(
-                                      onPressed: () => addToCart(product.id),
-                                      icon: const Icon(
-                                        Icons.add_shopping_cart,
-                                        size: 16,
-                                      ),
-                                      label: const Text('Add to Cart'),
-                                      style: ElevatedButton.styleFrom(
-                                        padding: const EdgeInsets.symmetric(
-                                          vertical: 8,
-                                        ),
-                                      ),
-                                    ),
+                                  IconButton(
+                                    icon: const Icon(Icons.add_shopping_cart),
+                                    onPressed: () => addToCart(product.id),
                                   ),
                                 ],
                               ),
-                            ),
+                            ],
                           ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
               ),
     );
   }
